@@ -12,9 +12,8 @@ app = Flask(__name__)
 # Get bot token
 BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 
-# IMPORTANT: Replace this with your ACTUAL Railway URL
-# You can find this in your Railway dashboard
-RAILWAY_URL = 'https://smartreply1bot.up.railway.app'  # <-- CHANGE THIS
+# Get Railway URL
+RAILWAY_URL = os.environ.get('RAILWAY_STATIC_URL', 'https://your-app.up.railway.app')
 
 logger.info(f"Bot token loaded: {bool(BOT_TOKEN)}")
 logger.info(f"Railway URL: {RAILWAY_URL}")
@@ -29,7 +28,7 @@ def get_reply(text):
     elif 'help' in text:
         return "I can reply to your messages! Try saying 'hi' or 'how are you'"
     elif 'time' in text:
-        return "🕐 It's bot time! ⏰"
+        return "It's bot time! ⏰"
     elif 'joke' in text:
         return "Why do programmers prefer dark mode? Because light attracts bugs! 😄"
     elif 'bye' in text or 'goodbye' in text:
@@ -43,8 +42,7 @@ def get_reply(text):
 def home():
     return jsonify({
         'status': 'running',
-        'token_loaded': bool(BOT_TOKEN),
-        'webhook_url': f"{RAILWAY_URL}/webhook"
+        'token_loaded': bool(BOT_TOKEN)
     })
 
 @app.route('/health', methods=['GET'])
