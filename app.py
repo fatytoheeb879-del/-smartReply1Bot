@@ -2,7 +2,6 @@ import os
 import sys
 import logging
 import re
-import time
 from datetime import datetime
 from flask import Flask, request, jsonify
 import requests
@@ -11,35 +10,57 @@ import requests
 # CONFIGURATION & SETUP
 # ============================================
 
-# Configure logging for Railway
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# Get environment variables from Railway
+# ============================================
+# GET BOT TOKEN FROM ENVIRONMENT
+# ============================================
+
+# Try multiple ways to get the token
+BOT_TOKEN = None
+
+# Method 1: Standard Railway environment variable
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+
+# Method 2: Alternative variable name (just in case)
 if not BOT_TOKEN:
-    logger.error("❌ TELEGRAM_BOT_TOKEN not set in environment variables!")
-    sys.exit(1)
+    BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-# Railway provides this automatically
-RAILWAY_URL = os.environ.get("RAILWAY_STATIC_URL")
-if not RAILWAY_URL:
-    logger.warning("⚠️ RAILWAY_STATIC_URL not set, using fallback")
-    RAILWAY_URL = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "https://your-app.up.railway.app")
+# Method 3: From Railway secrets
+if not BOT_TOKEN:
+    BOT_TOKEN = os.environ.get("RAILWAY_SECRET_TELEGRAM_BOT_TOKEN")
 
-WEBHOOK_URL = f"{RAILWAY_URL}/webhook"
-logger.info(f"✅ Webhook URL: {WEBHOOK_URL}")
+# Log token status (without revealing full token)
+if BOT_TOKEN:
+    logger.info(f"✅ Bot token loaded successfully (starts with: {BOT_TOKEN[:8]}...)")
+else:
+    logger.warning("⚠️ No bot token found in environment variables!")
+    logger.warning("⚠️ Bot will run but won't respond to messages until token is set.")
 
 # ============================================
-# SMART REPLY RULES - CUSTOMIZE HERE!
+# RAILWAY URL SETUP
+# ============================================
+
+# Get Railway URL
+RAILWAY_URL = os.environ.get("RAILWAY_STATIC_URL")
+if not RAILWAY_URL:
+    RAILWAY_URL = os.environ.get("RAILWAY_PUBLIC_DOMAIN")
+if not RAILWAY_URL:
+    RAILWAY_URL = "https://smartreply1bot.up.railway.app"  # Fallback
+
+WEBHOOK_URL = f"{RAILWAY_URL}/webhook" if BOT_TOKEN else None
+
+logger.info(f"🌐 Railway URL: {RAILWAY_URL}")
+
+# ============================================
+# SMART REPLY RULES
 # ============================================
 
 REPLY_RULES = {
@@ -55,12 +76,12 @@ REPLY_RULES = {
     
     # Identity
     r"(what('?s)? your name|who are you|tell me about yourself)": 
-        "I'm Smart Reply Bot! 🤖 Your friendly auto-reply assistant. I was created to make conversations easier!",
+        "I'm Smart Reply Bot! 🤖 Your friendly auto-reply assistant.",
     
     r"who created you|who made you|who is your creator": 
         "I was created by a talented developer using Python and Flask! 🚀",
     
-    # Help & Commands
+    # Help
     r"help|commands|what can you do|what do you do": 
         "🤖 <b>I can do a lot!</b>\n\n"
         "✅ Reply to your messages\n"
@@ -83,72 +104,58 @@ REPLY_RULES = {
         "🖥️ Because light attracts bugs! 🐛\n\n"
         "😂 Get it?",
     
-    r"another joke|more jokes": 
-        "What do you call a fake noodle? 🍜\n"
-        "An <b>impasta</b>! 🍝\n\n"
-        "😂 Okay, that was cheesy!",
-    
-    # Compliments & Love
+    # Compliments
     r"i love you|love you|luv you|i (like|adore) you": 
-        "Aww, that's so sweet! ❤️ I love you too! You're amazing! 😊",
+        "Aww, that's so sweet! ❤️ I love you too!",
     
     r"you are (beautiful|handsome|cute|pretty|awesome|great|amazing)": 
-        "😊 Thank you so much! That means a lot to me! You're pretty awesome yourself! 🌟",
+        "😊 Thank you so much! That means a lot to me!",
     
     # Thanks
     r"thank(s| you| you so much| you very much)|thx|thanks a lot": 
-        "You're welcome! 😊 Happy to help! Have a great day! 🌟",
+        "You're welcome! 😊 Happy to help!",
     
     # Goodbye
     r"bye|goodbye|see you|see you later|gotta go|ttyl": 
-        "Goodbye! 👋 It was nice talking to you! Have a wonderful day! ✨",
+        "Goodbye! 👋 It was nice talking to you!",
     
-    # Miscellaneous
-    r"weather|forecast|rain|sunny": 
-        "🌤️ I don't have weather data yet, but I'm learning! Try checking a weather app for now!",
-    
-    r"who are you|what is this bot": 
-        "I'm Smart Reply Bot 🤖 - your go-to bot for quick, friendly, and smart automatic replies!",
-    
+    # Test
     r"test|testing|ping": 
         "Pong! 🏓 The bot is working perfectly! ✅",
 }
 
-# ============================================
-# BOT FUNCTIONS
-# ============================================
-
 def smart_reply(message_text):
     """
-    Analyze message and return the most appropriate reply using pattern matching.
+    Analyze message and return appropriate reply.
     """
     if not message_text or not message_text.strip():
         return "🤔 I didn't catch that. Could you please say something?"
     
-    # Clean the message
     clean_message = message_text.lower().strip()
     
     # Check each rule
     for pattern, reply in REPLY_RULES.items():
         if re.search(pattern, clean_message, re.IGNORECASE):
-            logger.info(f"✅ Pattern matched: {pattern}")
             return reply
     
     # Default fallback replies
     fallbacks = [
-        "🤔 I'm not sure how to reply to that. Try saying 'hi' or 'help' to get started!",
-        "😅 I don't understand that yet. I'm still learning! Try asking me something else.",
-        "🤷 I'm not programmed to respond to that. But I'm getting smarter every day!",
+        "🤔 I'm not sure how to reply to that. Try saying 'hi' or 'help'!",
+        "😅 I don't understand that yet. I'm still learning!",
+        "🤷 I'm not programmed to respond to that. Try asking something else!",
     ]
     
-    # Rotate through fallbacks for variety
     fallback_index = hash(clean_message) % len(fallbacks)
     return fallbacks[fallback_index]
 
 def send_message(chat_id, text, parse_mode='HTML'):
     """
-    Send a message via the Telegram Bot API.
+    Send a message via Telegram API.
     """
+    if not BOT_TOKEN:
+        logger.error("❌ Cannot send message: No bot token available")
+        return None
+    
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": chat_id,
@@ -163,14 +170,15 @@ def send_message(chat_id, text, parse_mode='HTML'):
         logger.info(f"✅ Message sent to {chat_id}")
         return response.json()
     except requests.exceptions.RequestException as e:
-        logger.error(f"❌ Failed to send message to {chat_id}: {e}")
+        logger.error(f"❌ Failed to send message: {e}")
         return None
 
 def set_webhook():
     """
     Set the webhook URL for the bot.
     """
-    if not BOT_TOKEN:
+    if not BOT_TOKEN or not WEBHOOK_URL:
+        logger.warning("⚠️ Cannot set webhook: Missing token or URL")
         return False
     
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook"
@@ -183,48 +191,15 @@ def set_webhook():
         response = requests.post(url, json=payload, timeout=10)
         response.raise_for_status()
         data = response.json()
-        logger.info(f"✅ Webhook set successfully: {data}")
-        return data.get('ok', False)
+        if data.get('ok'):
+            logger.info(f"✅ Webhook set successfully: {WEBHOOK_URL}")
+            return True
+        else:
+            logger.error(f"❌ Webhook set failed: {data}")
+            return False
     except requests.exceptions.RequestException as e:
         logger.error(f"❌ Failed to set webhook: {e}")
         return False
-
-def get_webhook_info():
-    """
-    Get current webhook information for debugging.
-    """
-    if not BOT_TOKEN:
-        return None
-    
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getWebhookInfo"
-    try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        logger.info(f"📊 Webhook info: {data}")
-        return data
-    except requests.exceptions.RequestException as e:
-        logger.error(f"❌ Failed to get webhook info: {e}")
-        return None
-
-def get_bot_info():
-    """
-    Get bot information.
-    """
-    if not BOT_TOKEN:
-        return None
-    
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getMe"
-    try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        if data.get('ok'):
-            logger.info(f"🤖 Bot info: {data['result']}")
-        return data
-    except requests.exceptions.RequestException as e:
-        logger.error(f"❌ Failed to get bot info: {e}")
-        return None
 
 # ============================================
 # FLASK ROUTES
@@ -232,26 +207,23 @@ def get_bot_info():
 
 @app.route('/', methods=['GET'])
 def home():
-    """
-    Home page to verify bot is running on Railway.
-    """
+    """Home page to verify bot is running."""
     return jsonify({
         "status": "running",
         "bot_name": "Smart Reply Bot 🤖",
         "version": "1.0.0",
         "time": datetime.now().isoformat(),
+        "token_loaded": bool(BOT_TOKEN),
         "webhook_url": WEBHOOK_URL,
-        "environment": os.environ.get("RAILWAY_ENVIRONMENT", "production"),
     })
 
 @app.route('/health', methods=['GET'])
 def health():
-    """
-    Health check endpoint for Railway.
-    """
+    """Health check endpoint."""
     return jsonify({
         "status": "healthy",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
+        "token_loaded": bool(BOT_TOKEN)
     }), 200
 
 @app.route('/webhook', methods=['POST'])
@@ -260,6 +232,11 @@ def webhook():
     Main webhook endpoint to receive updates from Telegram.
     """
     logger.info("📨 Webhook received")
+    
+    # Check if token is available
+    if not BOT_TOKEN:
+        logger.error("❌ No bot token available to process webhook")
+        return jsonify({"status": "error", "message": "Bot token not configured"}), 500
     
     try:
         # Get the incoming request data
@@ -275,28 +252,26 @@ def webhook():
             message = data["message"]
             chat_id = message["chat"]["id"]
             
-            # Handle different message types
+            # Handle text messages
             if "text" in message:
                 user_message = message["text"].strip()
                 logger.info(f"💬 Received from {chat_id}: {user_message}")
                 
                 # Generate smart reply
                 reply = smart_reply(user_message)
-                logger.info(f"💬 Generated reply: {reply}")
+                logger.info(f"💬 Reply: {reply}")
                 
                 # Send reply
                 send_message(chat_id, reply)
             
             elif "new_chat_members" in message:
                 # Welcome new members
-                for member in message["new_chat_members"]:
-                    welcome_msg = f"👋 Welcome to the chat, {member.get('first_name', 'friend')}! I'm Smart Reply Bot. Say 'hi' to get started!"
-                    send_message(chat_id, welcome_msg)
+                welcome_msg = "👋 Welcome! I'm Smart Reply Bot. Say 'hi' to get started!"
+                send_message(chat_id, welcome_msg)
             
             else:
                 # Non-text messages
-                response = "🤖 I can only understand text messages right now. Try sending a message!"
-                send_message(chat_id, response)
+                send_message(chat_id, "🤖 I can only understand text messages right now.")
         
         return jsonify({"status": "ok"}), 200
     
@@ -306,54 +281,49 @@ def webhook():
 
 @app.route('/set_webhook', methods=['GET'])
 def manual_set_webhook():
-    """
-    Manually set the webhook via browser.
-    """
-    result = set_webhook()
-    return jsonify({
-        "success": result,
-        "webhook_url": WEBHOOK_URL
-    })
+    """Manually set the webhook via browser."""
+    if set_webhook():
+        return jsonify({
+            "success": True,
+            "webhook_url": WEBHOOK_URL,
+            "message": "Webhook set successfully!"
+        })
+    else:
+        return jsonify({
+            "success": False,
+            "error": "Failed to set webhook",
+            "webhook_url": WEBHOOK_URL
+        }), 500
 
 @app.route('/webhook_info', methods=['GET'])
 def webhook_info():
-    """
-    Get current webhook status.
-    """
-    info = get_webhook_info()
-    return jsonify(info)
+    """Get current webhook status."""
+    if not BOT_TOKEN:
+        return jsonify({"error": "Bot token not configured"}), 500
+    
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getWebhookInfo"
+    try:
+        response = requests.get(url, timeout=10)
+        return jsonify(response.json())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # ============================================
 # APPLICATION STARTUP
 # ============================================
 
-@app.before_first_request
-def setup():
-    """
-    Run setup tasks before the first request.
-    """
-    logger.info("🚀 Starting up Smart Reply Bot...")
-    
-    # Get bot info
-    bot_info = get_bot_info()
-    if bot_info and bot_info.get('ok'):
-        logger.info(f"✅ Bot authenticated: @{bot_info['result']['username']}")
-    
-    # Set webhook
-    if set_webhook():
-        logger.info(f"✅ Webhook configured: {WEBHOOK_URL}")
-    else:
-        logger.warning("⚠️ Failed to set webhook automatically")
-        logger.warning(f"⚠️ Please visit: {RAILWAY_URL}/set_webhook")
-
-# ============================================
-# MAIN ENTRY POINT
-# ============================================
-
 if __name__ == '__main__':
-    # Get port from Railway environment
+    # Get port from Railway
     port = int(os.environ.get('PORT', 5000))
-    logger.info(f"🚀 Starting Flask server on port {port}")
+    logger.info(f"🚀 Starting Smart Reply Bot on port {port}")
+    
+    # Try to set webhook if token is available
+    if BOT_TOKEN:
+        set_webhook()
+        logger.info("✅ Bot is ready to receive messages!")
+    else:
+        logger.warning("⚠️ Bot token not set! Please set TELEGRAM_BOT_TOKEN environment variable.")
+        logger.info("ℹ️ Bot will still run but won't respond to messages.")
     
     # Run the Flask app
     app.run(host='0.0.0.0', port=port, debug=False)
